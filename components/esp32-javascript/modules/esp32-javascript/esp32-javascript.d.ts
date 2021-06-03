@@ -16,7 +16,6 @@ declare function el_store(key: string, value: string): void;
 
 declare function setDateTimeInMillis(time: number): void;
 declare function setDateTimeZoneOffsetInHours(hours: number): void;
-
 interface Esp32JsFirmwareDefaults {
   basicAuthUsername: string;
   basicAuthPassword: string;
@@ -37,11 +36,17 @@ declare function el_suspend(): Esp32JsEventloopEvent[];
 declare function main(): void;
 
 interface Esp32JsWifiConfig {
-  bssid: number[];
+  bssid: [number, number, number, number, number, number];
 }
 declare function getWifiConfig(): Esp32JsWifiConfig;
 declare const EL_WIFI_EVENT_TYPE: number;
-declare function el_connectWifi(ssid: string, password: string): void;
+declare const EL_TIMER_EVENT_TYPE: number;
+declare const EL_LOG_EVENT_TYPE: number;
+declare function el_connectWifi(
+  ssid: string,
+  password: string,
+  bssid?: [number, number, number, number, number, number]
+): void;
 declare function el_createSoftAp(ssid: string, password: string): void;
 
 declare function writeSocket(
@@ -78,7 +83,54 @@ declare const EL_SOCKET_EVENT_TYPE: number;
 declare function readSocket(
   sockfd: number,
   ssl: any
-): { data: string; length: number };
+): { data: Uint8Array; length: number };
 
 declare function readFile(path: string): string;
-declare function writeFile(path: string, data: string): void;
+declare function writeFile(path: string, data: string): number;
+declare function appendFile(path: string, data: string): number;
+declare function removeFile(path: string): number;
+declare function fileSize(path: string): number;
+declare function listDir(path: string): string[];
+declare function mkdir(path: string): void;
+
+// ota
+declare function el_is_native_ota_supported(): boolean;
+declare function el_ota_begin(): number;
+declare function el_ota_write(handle: number, data: Uint8Array): number;
+declare function el_ota_end(handle: number): number;
+declare function el_ota_switch_boot_partition(): number;
+
+declare function el_ota_find_next_modules_partition(): number;
+declare function el_partition_erase(partition: number): void;
+declare function el_partition_write(
+  partition: number,
+  offset: number,
+  data: Uint8Array
+): void;
+declare function el_find_partition(name: string): {
+  _ref: number;
+  size: number;
+};
+declare function el_readAndFreeString(ptr: number): string;
+
+interface Console {
+  /*
+   * Check if logger level is appropiate to print debug messsages.
+   */
+  isDebug: boolean;
+
+  /*
+   * Check if logger level is appropiate to print info messsages.
+   */
+  isInfo: boolean;
+
+  /*
+   * Check if logger level is appropiate to print warn messsages.
+   */
+  isWarn: boolean;
+
+  /*
+   * Check if logger level is appropiate to print error messsages.
+   */
+  isError: boolean;
+}

@@ -1,4 +1,11 @@
 {
-  "presets": ["minify"],
+  "presets": [
+    [
+      "minify",
+      {
+        "builtIns": false
+      }
+    ]
+  ],
   "comments": false
 }

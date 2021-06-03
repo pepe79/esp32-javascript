@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Marcel Kottmann
+Copyright (c) 2021 Marcel Kottmann
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,7 @@ int createNonBlockingSocket(int domain, int type, int protocol, bool nonblocking
     sockfd = socket(domain, type, protocol);
     if (sockfd < 0)
     {
-        jslog(ERROR, "ERROR opening socket\n");
+        jslog(ERROR, "ERROR opening socket");
         return -1;
     }
 
@@ -60,7 +60,7 @@ int createNonBlockingSocket(int domain, int type, int protocol, bool nonblocking
         ret = lwip_ioctl(sockfd, FIONBIO, &opt);
         if (ret < 0)
         {
-            jslog(ERROR, "Cannot set non-blocking opt.\n");
+            jslog(ERROR, "Cannot set non-blocking opt.");
             return -1;
         }
     }
@@ -78,7 +78,7 @@ int connectNonBlocking(int sockfd, const char *hostname, int portno)
     server = gethostbyname(hostname);
     if (server == NULL)
     {
-        jslog(ERROR, "ERROR, no such host as %s\n", hostname);
+        jslog(ERROR, "ERROR, no such host as %s", hostname);
         return -1;
     }
 
@@ -93,7 +93,7 @@ int connectNonBlocking(int sockfd, const char *hostname, int portno)
     ret = connect(sockfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
     if (ret == -1 && errno != EINPROGRESS)
     {
-        jslog(ERROR, "ERROR connecting\n");
+        jslog(ERROR, "ERROR connecting");
         return -1;
     }
     return 0;
@@ -111,7 +111,7 @@ int acceptIncoming(int sockfd)
         int ret = lwip_ioctl(cfd, FIONBIO, &opt);
         if (ret < 0)
         {
-            jslog(ERROR, "ERROR while accepting and setting non blocking: %d\n", errno);
+            jslog(ERROR, "ERROR while accepting and setting non blocking: %d", errno);
             return -1;
         }
     }
@@ -119,7 +119,7 @@ int acceptIncoming(int sockfd)
     {
         if (errno != EAGAIN)
         {
-            jslog(ERROR, "ERROR while accepting: %d\n", errno);
+            jslog(ERROR, "ERROR while accepting: %d", errno);
         }
     }
     return cfd;
@@ -141,13 +141,13 @@ int bindAndListen(int sockfd, int portno)
                sizeof(serveraddr));
     if (ret == -1)
     {
-        jslog(ERROR, "ERROR binding\n");
+        jslog(ERROR, "ERROR binding");
         return -1;
     }
 
     if (listen(sockfd, LISTEN_BACKLOG) == -1)
     {
-        jslog(ERROR, "ERROR listening\n");
+        jslog(ERROR, "ERROR listening");
         return -1;
     }
     return 0;
@@ -169,12 +169,12 @@ int writeSocket(int sockfd, const char *msg, int len, SSL *ssl)
     {
         if (errno == EAGAIN)
         {
-            jslog(INFO, "EAGAIN in socket: %d\n", errno);
+            jslog(DEBUG, "EAGAIN in socket %d, errno %d", sockfd, errno);
             return 0;
         }
         else
         {
-            jslog(ERROR, "ERROR writing to socket: %d\n", errno);
+            jslog(ERROR, "ERROR writing to socket %d, errno %d", sockfd, errno);
             return n;
         }
     }
@@ -192,7 +192,7 @@ int readSocket(int sockfd, char *msg, int len)
     int ret = lwip_ioctl(sockfd, FIONBIO, &opt);
     if (ret < 0)
     {
-        jslog(ERROR, "Cannot set non-blocking opt.\n");
+        jslog(ERROR, "Cannot set non-blocking opt.");
         return -1;
     }
 
@@ -206,7 +206,7 @@ int readSocket(int sockfd, char *msg, int len)
                         &tv,
                         sizeof(struct timeval)) < 0)
     {
-        jslog(ERROR, "Cannot set timeout opt.\n");
+        jslog(ERROR, "Cannot set timeout opt.");
         return -1;
     }
 

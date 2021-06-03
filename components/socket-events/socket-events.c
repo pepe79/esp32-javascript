@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Marcel Kottmann
+Copyright (c) 2021 Marcel Kottmann
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -75,7 +75,7 @@ int createSocketPair()
 {
     struct sockaddr_in server;
 
-    jslog(DEBUG, "Start creating socket paair\n");
+    jslog(DEBUG, "Start creating socket paair");
     /*int bits = xEventGroupGetBits(wifi_event_group);
     int connected = CONNECTED_BIT & bits;
 */
@@ -92,17 +92,17 @@ int createSocketPair()
             server.sin_port = htons(port);
             server.sin_len = sizeof(server);
 
-            jslog(DEBUG, "Trying to bind socket %d...\n", sd);
+            jslog(DEBUG, "Trying to bind socket %d...", sd);
 
             if (bind(sd, (struct sockaddr *)&server, sizeof(server)) >= 0)
             {
-                jslog(DEBUG, "Trying to create client socket...\n");
+                jslog(DEBUG, "Trying to create client socket...");
 
                 int sc = createNonBlockingSocket(AF_INET, SOCK_DGRAM, 0, true);
 
-                jslog(DEBUG, "Created socket pair: %d<-->%d\n", sd, sc);
+                jslog(DEBUG, "Created socket pair: %d<-->%d", sd, sc);
 
-                jslog(DEBUG, "Send test data...\n");
+                jslog(DEBUG, "Send test data...");
 
                 memset((char *)&target, 0, sizeof(target));
                 target.sin_family = AF_INET;
@@ -112,11 +112,11 @@ int createSocketPair()
 
                 if (sendto(sc, "", 1, 0, (struct sockaddr *)&target, sizeof(target)) < 0)
                 {
-                    jslog(ERROR, "Error sending test data to self-socket: %d\n", errno);
+                    jslog(ERROR, "Error sending test data to self-socket: %d", errno);
                 }
                 else
                 {
-                    jslog(DEBUG, "Trying to receive test data...\n");
+                    jslog(DEBUG, "Trying to receive test data...");
                     char msg[2] = "A";
                     struct sockaddr_in remaddr;
                     socklen_t addrlen = sizeof(remaddr);
@@ -128,29 +128,29 @@ int createSocketPair()
 
                     while (result < 0)
                     {
-                        jslog(ERROR, "Error receiving test data from self-socket: %d\n", errno);
+                        jslog(ERROR, "Error receiving test data from self-socket: %d", errno);
                     }
-                    jslog(DEBUG, "Finished reading.\n");
+                    jslog(DEBUG, "Finished reading.");
 
                     if (strcmp(msg, "") == 0)
                     {
-                        jslog(INFO, "Self-Socket Test successful!\n");
+                        jslog(INFO, "Self-Socket Test successful!");
 
                         selectClientSocket = sc;
                         selectServerSocket = sd;
-                        jslog(DEBUG, "Successfully created socket pair: %d<-->%d\n", selectServerSocket, selectClientSocket);
+                        jslog(DEBUG, "Successfully created socket pair: %d<-->%d", selectServerSocket, selectClientSocket);
                         return 0;
                     }
                     else
                     {
-                        jslog(ERROR, "Self-socket test NOT successful: %s\n", msg);
+                        jslog(ERROR, "Self-socket test NOT successful: %s", msg);
                     }
                 }
                 close(sc);
             }
             else
             {
-                jslog(ERROR, "Binding self-socket was unsuccessful: %d\n", errno);
+                jslog(ERROR, "Binding self-socket was unsuccessful: %d", errno);
             }
 
             close(sd);
@@ -162,10 +162,10 @@ int createSocketPair()
     }
     else
     {
-        jslog(DEBUG, "Skip until wifi connected: %d\n", errno);
+        jslog(DEBUG, "Skip until wifi connected: %d", errno);
     }
 
-    jslog(DEBUG, "Could not create socket pair... no wifi?\n");
+    jslog(DEBUG, "Could not create socket pair... no wifi?");
     return -1;
 }
 
@@ -231,7 +231,7 @@ void select_task_it()
         {
             jslog(ERROR, "Error getting data available from self-socket: %d.", errno);
         }
-        jslog(DEBUG, "DATA AVAILABLE %d.\n", dataAvailable);
+        jslog(DEBUG, "DATA AVAILABLE %d.", dataAvailable);
         //read self-socket if flag is set
         if (dataAvailable > 0)
         {
@@ -240,11 +240,7 @@ void select_task_it()
             socklen_t addrlen = sizeof(remaddr);
             if (recvfrom(selectServerSocket, msg, dataAvailable, 0, (struct sockaddr *)&remaddr, &addrlen) < 0)
             {
-                jslog(ERROR, "READ self-socket FAILED: %d\n", errno);
-            }
-            else
-            {
-                jslog(DEBUG, "READ of self-socket.\n");
+                jslog(ERROR, "READ self-socket FAILED: %d", errno);
             }
         }
 
@@ -256,7 +252,6 @@ void select_task_it()
         // self socket end
         int ret = select(sockfd_max + 1, &readset, &writeset, &errset, NULL);
         needsUnblock = true;
-        jslog(DEBUG, "Select return %d.\n", ret);
         if (ret >= 0)
         {
             if (ret > 0)
@@ -305,23 +300,23 @@ void select_task_it()
 
                 if (events.events_len > 0)
                 {
-                    jslog(DEBUG, "Fire all %d socket events!\n", events.events_len);
+                    jslog(DEBUG, "Fire all %d socket events!", events.events_len);
                     el_fire_events(&events);
                 }
                 else
                 {
-                    jslog(DEBUG, "No socket events to fire!\n");
+                    jslog(DEBUG, "No socket events to fire!");
                 }
             }
         }
         else
         {
-            jslog(ERROR, "select returns ERROR: %d\n", errno);
+            jslog(ERROR, "select returns ERROR: %d", errno);
         }
     }
     //wait for next loop
     needsUnblock = true;
-    jslog(DEBUG, "Select loop finished and now waits for next iteration.\n");
+    jslog(DEBUG, "Select loop finished and now waits for next iteration.");
     xSemaphoreTake(xSemaphore, portMAX_DELAY);
     needsUnblock = false;
 }
@@ -451,7 +446,7 @@ static duk_ret_t el_registerSocketEvents(duk_context *ctx)
 
     if (changes)
     {
-        jslog(DEBUG, "Trying to trigger the next select iteration... ");
+        jslog(DEBUG, "Trying to trigger the next select iteration...");
         if (selectClientSocket >= 0)
         {
             //interrupt select through self-socket
@@ -459,11 +454,11 @@ static duk_ret_t el_registerSocketEvents(duk_context *ctx)
             needsUnblock = true;
             if (sendto(selectClientSocket, ".", 1, 0, (struct sockaddr *)&target, sizeof(target)) < 0)
             {
-                jslog(ERROR, "Self-socket sending was NOT successful: %d\n", errno);
+                jslog(ERROR, "Self-socket sending was NOT successful: %d", errno);
             }
             else
             {
-                jslog(DEBUG, "Self-socket sending was successful.\n");
+                jslog(DEBUG, "Self-socket sending was successful.");
             }
         }
     }
@@ -492,8 +487,7 @@ static duk_ret_t el_connectNonBlocking(duk_context *ctx)
     int port = duk_to_int(ctx, 2);
 
     int ret = connectNonBlocking(sockfd, hostname, port);
-    duk_push_int(ctx, ret);
-    return 1;
+    return ret >= 0 ? 0 : -1;
 }
 
 static duk_ret_t el_bindAndListen(duk_context *ctx)
@@ -515,13 +509,13 @@ static duk_ret_t el_acceptIncoming(duk_context *ctx)
     {
         if (errno == EAGAIN)
         {
-            jslog(INFO, "accept returned EAGAIN\n");
+            jslog(DEBUG, "accept returned EAGAIN");
             //return undefined
             return 0;
         }
         else
         {
-            jslog(ERROR, "accept returned errno:%d on socket %d\n", errno, sockfd);
+            jslog(ERROR, "accept returned errno:%d on socket %d", errno, sockfd);
         }
     }
 
@@ -713,19 +707,21 @@ static duk_ret_t el_readSocket(duk_context *ctx)
         duk_idx_t obj_idx = duk_push_object(ctx);
         duk_push_int(ctx, ret);
         duk_put_prop_string(ctx, obj_idx, "length");
-        duk_push_string(ctx, msg);
+        //duk_push_string(ctx, msg);
+        void *p = duk_push_fixed_buffer(ctx, ret);
+        memcpy(p, msg, ret);
         duk_put_prop_string(ctx, obj_idx, "data");
     }
     else if ((ssl == NULL && error == EAGAIN) || (ssl != NULL && error == SSL_ERROR_WANT_READ))
     {
-        jslog(DEBUG, "*** EAGAIN OR SSL_ERROR_WANT_READ RETURNED!!!\n");
+        jslog(DEBUG, "*** EAGAIN OR SSL_ERROR_WANT_READ RETURNED!!!");
 
         //eagain
         duk_push_undefined(ctx);
     }
     else
     {
-        jslog(ERROR, "READ ERROR return value %d and error code %d\n", ret, error);
+        jslog(ERROR, "READ ERROR return value %d and error code %d", ret, error);
         //error
         duk_push_null(ctx);
     }
@@ -734,11 +730,11 @@ static duk_ret_t el_readSocket(duk_context *ctx)
 
 void select_task(void *ignore)
 {
-    jslog(DEBUG, "Starting select task...\n");
+    jslog(DEBUG, "Starting select task...");
 
     while (true)
     {
-        jslog(DEBUG, "Starting next select loop.\n");
+        jslog(DEBUG, "Starting next select loop.");
         select_task_it();
     }
 }

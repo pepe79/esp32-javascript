@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Marcel Kottmann
+Copyright (c) 2021 Marcel Kottmann
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@ extern "C"
         void *fd;
     } js_event_t;
 
-#define MAX_EVENTS 4
+#define MAX_EVENTS 8
     typedef struct
     {
         js_event_t events[MAX_EVENTS];
@@ -67,6 +67,7 @@ extern "C"
     void loadJS(duk_context *ctx, const char *name, char *start, char *end);
 
     int esp32_javascript_init();
+    bool isNativeOtaSupported();
 
 #ifdef __cplusplus
 }

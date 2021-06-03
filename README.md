@@ -92,6 +92,13 @@ If you need more than this, you can create your own esp-idf component below `./c
 Additionally you have to set your component name in the top level `./CMakeLists.txt`. Refer to the documentation next to the setting `ESP32_JS_PROJECT_NAME`.
 See [ESP Build System](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/build-system.html) for information on how to create a component with the esp-idf build system.
 
+### Native OTA
+
+You can perform a native firmware OTA upgrade by calling the URL /setup . There is a section called "Native OTA" where you can provide two urls to the new images: One for the actual firmware image (normally named esp32-javascript.bin in your build directory) and the other for the JS modules image (normally named modules.bin in your build directory).
+
+The upgrade is performed in the background. You can check the upgrade status either by staying on the upgrade page, which is reloaded automatically every ~20 seconds or click on "Upgrade status" in the setup page.
+
+After upgrade has finished you have to restart the device to load the new firmware.
 ### Clean
 
 You can clean the project by executing

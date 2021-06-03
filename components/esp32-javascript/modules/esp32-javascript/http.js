@@ -1,6 +1,30 @@
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.XMLHttpRequest = exports.httpClient = exports.parseQueryStr = exports.decodeQueryParam = exports.httpServer = void 0;
+exports.XMLHttpRequest = exports.getDefaultPort = exports.httpClient = exports.parseQueryStr = exports.decodeQueryParam = exports.httpServer = void 0;
+/*
+MIT License
+
+Copyright (c) 2021 Marcel Kottmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 var socketEvents = require("socket-events");
+var chunked_1 = require("./chunked");
 var stringbuffer_1 = require("./stringbuffer");
 var sockListen = socketEvents.sockListen;
 var sockConnect = socketEvents.sockConnect;
@@ -50,7 +74,9 @@ function httpServer(port, isSSL, cb) {
         var gotten = 0;
         var active = [];
         socket.onData = function (data, _, length) {
-            complete = complete ? complete.append(data) : new stringbuffer_1.StringBuffer(data);
+            complete = complete
+                ? complete.append(textDecoder.decode(data))
+                : new stringbuffer_1.StringBuffer(textDecoder.decode(data));
             gotten += length;
             var endOfHeaders = complete.indexOf("\r\n\r\n");
             if (gotten >= 4 && endOfHeaders >= 0) {
@@ -67,20 +93,22 @@ function httpServer(port, isSSL, cb) {
                     contentLength = parseInt(contentLengthHeader);
                 }
                 if (contentLength > 0) {
-                    console.debug("A request body is expected.");
+                    if (console.isDebug) {
+                        console.debug("A request body is expected.");
+                    }
                     if (gotten >= endOfHeaders + 4 + contentLength) {
                         var potentialRequestBody = textEncoder.encode(complete.substring(endOfHeaders + 4).toString());
                         postedData = textDecoder.decode(potentialRequestBody.subarray(0, contentLength));
-                        console.debug("Request body is complete:");
-                        console.debug(postedData);
+                        if (console.isDebug) {
+                            console.debug("Request body is complete:");
+                            console.debug(postedData);
+                        }
                     }
                     else {
                         //wait for more data to come (body of  a POST request)
-                        console.debug("Waiting for more data to come:");
-                        console.debug(contentLength);
-                        console.debug(complete.length);
-                        console.debug(gotten);
-                        console.debug(endOfHeaders);
+                        if (console.isDebug) {
+                            console.debug("Waiting for more data to come:");
+                        }
                         return;
                     }
                 }
@@ -115,7 +143,7 @@ function httpServer(port, isSSL, cb) {
                         }
                         return close;
                     };
-                    var chunked_1 = function () {
+                    var chunked_2 = function () {
                         var chunked = true;
                         if (chunked && headers && headers.get("connection") === "close") {
                             chunked = false;
@@ -162,7 +190,7 @@ function httpServer(port, isSSL, cb) {
                                 socket.write("HTTP/1.1 " + res_1.status.status + " " + res_1.status.statusText + "\r\n");
                             }
                             if (!res_1.headersWritten) {
-                                if (chunked_1()) {
+                                if (chunked_2()) {
                                     responseHeaders_1.set("transfer-encoding", "chunked");
                                     chunkedEncoding_1 = true;
                                 }
@@ -171,7 +199,7 @@ function httpServer(port, isSSL, cb) {
                                 }
                                 if (!responseHeaders_1.has("connection")) {
                                     responseHeaders_1.set("connection", "keep-alive");
-                                    socket.setReadTimeout(20000);
+                                    socket.setReadTimeout(22222); // set to a non-standard timeout
                                 }
                                 var contentType = responseHeaders_1.get("content-type");
                                 if (typeof contentType !== "string") {
@@ -225,34 +253,44 @@ function httpServer(port, isSSL, cb) {
                     contentLength = 0;
                     headers = undefined;
                     statusLine = undefined;
-                    console.debug("gotten: " + gotten);
-                    console.debug("complete.length: " + complete.length);
                     var item_1 = { req: req_1, res: res_1 };
                     var num = active.push(item_1);
-                    console.debug("Currently active requests: " + num);
+                    if (console.isDebug) {
+                        console.debug("Currently active requests: " + num);
+                    }
                     res_1.on("end", function () {
-                        console.debug("splicing req/res form active list");
+                        if (console.isDebug) {
+                            console.debug("splicing req/res form active list");
+                        }
                         active.splice(active.indexOf(item_1), 1);
                     });
                     var previous = num - 2;
                     if (previous < 0 || active[previous].res.isEnded) {
                         // active request/response is empty, perform immediately
-                        console.debug("// active request/response is empty or entries are ended, perform immediately");
+                        if (console.isDebug) {
+                            console.debug("// active request/response is empty or entries are ended, perform immediately");
+                        }
                         setTimeout(function () {
-                            console.debug("perform immediate");
+                            if (console.isDebug) {
+                                console.debug("perform immediate");
+                            }
                             cb(req_1, res_1);
                         }, 0);
                     }
                     else {
                         // queue request/response callback after previous request/response
-                        console.debug("// queue request/response callback after previous request/response");
+                        if (console.isDebug) {
+                            console.debug("// queue request/response callback after previous request/response");
+                        }
                         active[previous].res.on("end", function () {
-                            console.debug("end of previous req/res: triggering new req/res callback");
+                            if (console.isDebug) {
+                                console.debug("end of previous req/res: triggering new req/res callback");
+                            }
                             cb(req_1, res_1);
                         });
                     }
                     if (gotten > 0 && socket.onData) {
-                        socket.onData("", _, 0);
+                        socket.onData(new Uint8Array(0), _, 0);
                     }
                 }
             }
@@ -284,7 +322,11 @@ function parseQueryStr(query) {
     return parsed;
 }
 exports.parseQueryStr = parseQueryStr;
-function httpClient(ssl, host, port, path, method, requestHeaders, body, successCB, errorCB, finishCB) {
+function httpClient(ssl, host, port, path, method, requestHeaders, body, successCB, // this is removed in favor of the new data and head callback (dataCB, headCB)
+errorCB, finishCB, dataCB, headCB) {
+    if (successCB) {
+        throw Error("The successCB is not supported anymore.");
+    }
     var complete = new stringbuffer_1.StringBuffer();
     var completeLength = 0;
     var chunked = false;
@@ -292,74 +334,108 @@ function httpClient(ssl, host, port, path, method, requestHeaders, body, success
     var headerEnd = -1;
     var contentLength = -1;
     requestHeaders = requestHeaders || "";
+    var headers;
+    var chunkedConsumer;
     if (!errorCB) {
         errorCB = print;
     }
-    sockConnect(ssl, host, port, function (socket) {
+    var textDecoder = new TextDecoder();
+    var socket = sockConnect(ssl, host, port, function (socket) {
         var bodyStr = body ? body.toString() : null;
         var requestLines = method + " " + path + " HTTP/1.1\r\nHost: " + host + "\r\n" + (bodyStr ? "Content-length: " + bodyStr.length + "\r\n" : "") + requestHeaders + "\r\n" + (bodyStr ? bodyStr + "\r\n" : "");
         socket.write(requestLines);
         socket.flush();
     }, function (data, sockfd, length) {
-        complete.append(data);
-        completeLength = completeLength + length;
-        if (!headerRead && (headerEnd = complete.indexOf("\r\n\r\n")) >= 0) {
-            headerRead = true;
-            chunked =
-                complete.toLowerCase().indexOf("transfer-encoding: chunked") >= 0;
-            var clIndex = complete.toLowerCase().indexOf("content-length: ");
-            if (clIndex >= 0) {
-                var endOfContentLength = complete.indexOf("\r\n", clIndex);
-                contentLength = parseInt(complete.substring(clIndex + 15, endOfContentLength).toString());
+        try {
+            complete === null || complete === void 0 ? void 0 : complete.append(textDecoder.decode(data));
+            completeLength = completeLength + length;
+            if (!headerRead &&
+                complete &&
+                (headerEnd = complete.indexOf("\r\n\r\n")) >= 0) {
+                headerRead = true;
+                chunked =
+                    complete.toLowerCase().indexOf("transfer-encoding: chunked") >= 0;
+                var clIndex = complete.toLowerCase().indexOf("content-length: ");
+                if (clIndex >= 0) {
+                    var endOfContentLength = complete.indexOf("\r\n", clIndex);
+                    contentLength = parseInt(complete.substring(clIndex + 15, endOfContentLength).toString());
+                }
+                headerEnd += 4;
+                headers = complete.substring(0, headerEnd);
+                complete = undefined;
+                if (headCB) {
+                    headCB(headers);
+                }
+                if (chunked) {
+                    chunkedConsumer = chunked_1.createChunkedEncodingConsumer(dataCB);
+                }
+                // the rest of the data is considered data and has to be consumed by the data consumers.
+                data = data.subarray(headerEnd, data.length);
             }
-            headerEnd += 4;
+            if (chunkedConsumer) {
+                // handle chunked data
+                var eof = chunkedConsumer(data);
+                if (eof) {
+                    closeSocket(sockfd);
+                }
+            }
+            else if (dataCB) {
+                // handle non chunked data
+                dataCB(data);
+            }
+            if (contentLength >= 0) {
+                if (completeLength - headerEnd == contentLength) {
+                    closeSocket(sockfd);
+                }
+            }
         }
-        if (chunked) {
-            if (complete.substring(complete.length - 5).toString() == "0\r\n\r\n") {
-                closeSocket(sockfd);
+        catch (error) {
+            if (errorCB) {
+                errorCB(error);
             }
-        }
-        if (contentLength >= 0) {
-            if (completeLength - headerEnd == contentLength) {
-                closeSocket(sockfd);
-            }
+            closeSocket(sockfd);
         }
     }, function () {
         if (errorCB) {
             errorCB("Could not load " + (ssl ? "https" : "http") + "://" + host + ":" + port + path);
         }
     }, function () {
-        var startFrom = headerEnd;
-        var content = null;
-        if (chunked) {
-            content = new stringbuffer_1.StringBuffer();
-            var chunkLength = void 0;
-            do {
-                var chunkLengthEnd = complete.indexOf("\r\n", startFrom);
-                var lengthStr = complete
-                    .substring(startFrom, chunkLengthEnd)
-                    .toString();
-                chunkLength = parseInt(lengthStr, 16);
-                var chunkEnd = chunkLengthEnd + chunkLength + 2;
-                content.append(complete.substring(chunkLengthEnd + 2, chunkEnd));
-                startFrom = chunkEnd + 2;
-            } while (chunkLength > 0);
-        }
-        else {
-            content = complete.substring(startFrom);
-        }
-        var headers = complete.substring(0, headerEnd);
-        if (successCB) {
-            successCB(content.toString(), headers.toString());
-        }
-        //free complete for GC
-        content = null;
         if (finishCB) {
             finishCB();
         }
     });
+    var client = {
+        cancelled: false,
+        cancel: function () {
+            if (!client.cancelled) {
+                client.cancelled = true;
+                if (errorCB) {
+                    errorCB("Request was cancelled.");
+                }
+                closeSocket(socket);
+            }
+        },
+    };
+    return client;
 }
 exports.httpClient = httpClient;
+// get default port
+function getDefaultPort(url) {
+    var port = parseInt(url.port, 10);
+    if (isNaN(port)) {
+        if (url.protocol === "https:") {
+            port = 443;
+        }
+        else if (url.protocol === "http:") {
+            port = 80;
+        }
+        else {
+            throw Error("Cannot determine default port for protocol " + url.protocol);
+        }
+    }
+    return port;
+}
+exports.getDefaultPort = getDefaultPort;
 var XMLHttpRequest = /** @class */ (function () {
     function XMLHttpRequest() {
         this.method = "GET";
@@ -368,14 +444,25 @@ var XMLHttpRequest = /** @class */ (function () {
         // eslint-disable-next-line @typescript-eslint/no-this-alias
         var self = this;
         if (this.url) {
-            httpClient(this.url.protocol === "https:", this.url.hostname, this.url.port, this.url.pathname + this.url.search, this.method, this.requestHeaders ? this.requestHeaders.toString() : undefined, body, function (data, responseHeaders) {
-                var r = responseHeaders.match(/^HTTP\/[0-9.]+ ([0-9]+) (.*)/);
+            var data_1 = undefined;
+            var responseHeaders_2 = undefined;
+            var textDecoder_1 = new TextDecoder();
+            httpClient(this.url.protocol === "https:", this.url.hostname, this.url.port, this.url.pathname + this.url.search, this.method, this.requestHeaders ? this.requestHeaders.toString() : undefined, body, undefined, function (error) {
+                console.error(error);
+                if (self.onerror) {
+                    self.onerror(error);
+                }
+            }, function () {
+                var r = responseHeaders_2 &&
+                    responseHeaders_2.toString().match(/^HTTP\/[0-9.]+ ([0-9]+) (.*)/);
                 if (r) {
                     self.status = parseInt(r[1], 10);
                     self.statusText = r[2];
                     self.responseURL = "";
-                    self.responseText = data;
-                    self.reponseHeaders = responseHeaders.substring(r[0].length + 2);
+                    self.responseText = data_1 && data_1.toString();
+                    self.reponseHeaders =
+                        responseHeaders_2 &&
+                            responseHeaders_2.substring(r[0].length + 2).toString();
                     if (self.onload) {
                         self.onload();
                     }
@@ -385,11 +472,17 @@ var XMLHttpRequest = /** @class */ (function () {
                         self.onerror("Bad http status line.");
                     }
                 }
-            }, function (error) {
-                console.error(error);
-                if (self.onerror) {
-                    self.onerror(error);
+                data_1 = undefined;
+                responseHeaders_2 = undefined;
+            }, function (dataIn) {
+                if (data_1) {
+                    data_1.append(textDecoder_1.decode(dataIn));
                 }
+                else {
+                    data_1 = new stringbuffer_1.StringBuffer(textDecoder_1.decode(dataIn));
+                }
+            }, function (head) {
+                responseHeaders_2 = head;
             });
         }
         else {
@@ -408,19 +501,7 @@ var XMLHttpRequest = /** @class */ (function () {
         if (this.url.protocol !== "http:" && this.url.protocol !== "https:") {
             throw Error("Unsupported protocol for esp32 fetch implementation: " + this.url.protocol);
         }
-        // get default port
-        var port = parseInt(this.url.port, 10);
-        if (isNaN(port)) {
-            if (this.url.protocol === "https:") {
-                port = 443;
-            }
-            else if (this.url.protocol === "http:") {
-                port = 80;
-            }
-            else {
-                throw Error("Cannot determine default port for protocol " + this.url.protocol);
-            }
-        }
+        var port = getDefaultPort(this.url);
         this.url.port = "" + port;
     };
     XMLHttpRequest.prototype.setRequestHeader = function (name, value) {

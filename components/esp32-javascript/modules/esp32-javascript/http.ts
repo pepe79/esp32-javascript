@@ -1,4 +1,31 @@
+/*
+MIT License
+
+Copyright (c) 2021 Marcel Kottmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 import socketEvents = require("socket-events");
+import {
+  ChunkedEncodingConsumer,
+  createChunkedEncodingConsumer,
+} from "./chunked";
 import { StringBuffer } from "./stringbuffer";
 
 export interface Esp32JsRequest {
@@ -78,8 +105,10 @@ export function httpServer(
       let gotten = 0;
       const active: { req: Esp32JsRequest; res: Esp32JsResponse }[] = [];
 
-      socket.onData = function (data: string, _: number, length: number) {
-        complete = complete ? complete.append(data) : new StringBuffer(data);
+      socket.onData = function (data: Uint8Array, _: number, length: number) {
+        complete = complete
+          ? complete.append(textDecoder.decode(data))
+          : new StringBuffer(textDecoder.decode(data));
         gotten += length;
 
         const endOfHeaders = complete.indexOf("\r\n\r\n");
@@ -102,8 +131,9 @@ export function httpServer(
           }
 
           if (contentLength > 0) {
-            console.debug("A request body is expected.");
-
+            if (console.isDebug) {
+              console.debug("A request body is expected.");
+            }
             if (gotten >= endOfHeaders + 4 + contentLength) {
               const potentialRequestBody = textEncoder.encode(
                 complete.substring(endOfHeaders + 4).toString()
@@ -111,15 +141,15 @@ export function httpServer(
               postedData = textDecoder.decode(
                 potentialRequestBody.subarray(0, contentLength)
               );
-              console.debug("Request body is complete:");
-              console.debug(postedData);
+              if (console.isDebug) {
+                console.debug("Request body is complete:");
+                console.debug(postedData);
+              }
             } else {
               //wait for more data to come (body of  a POST request)
-              console.debug("Waiting for more data to come:");
-              console.debug(contentLength);
-              console.debug(complete.length);
-              console.debug(gotten);
-              console.debug(endOfHeaders);
+              if (console.isDebug) {
+                console.debug("Waiting for more data to come:");
+              }
               return;
             }
           }
@@ -235,7 +265,7 @@ export function httpServer(
                   }
                   if (!responseHeaders.has("connection")) {
                     responseHeaders.set("connection", "keep-alive");
-                    socket.setReadTimeout(20000);
+                    socket.setReadTimeout(22222); // set to a non-standard timeout
                   }
                   const contentType = responseHeaders.get("content-type");
                   if (typeof contentType !== "string") {
@@ -298,42 +328,51 @@ export function httpServer(
             headers = undefined;
             statusLine = undefined;
 
-            console.debug(`gotten: ${gotten}`);
-            console.debug(`complete.length: ${complete.length}`);
-
             const item = { req, res };
             const num = active.push(item);
-            console.debug(`Currently active requests: ${num}`);
+            if (console.isDebug) {
+              console.debug(`Currently active requests: ${num}`);
+            }
             res.on("end", () => {
-              console.debug("splicing req/res form active list");
+              if (console.isDebug) {
+                console.debug("splicing req/res form active list");
+              }
               active.splice(active.indexOf(item), 1);
             });
 
             const previous = num - 2;
             if (previous < 0 || active[previous].res.isEnded) {
               // active request/response is empty, perform immediately
-              console.debug(
-                "// active request/response is empty or entries are ended, perform immediately"
-              );
+              if (console.isDebug) {
+                console.debug(
+                  "// active request/response is empty or entries are ended, perform immediately"
+                );
+              }
               setTimeout(() => {
-                console.debug("perform immediate");
+                if (console.isDebug) {
+                  console.debug("perform immediate");
+                }
                 cb(req, res);
               }, 0);
             } else {
               // queue request/response callback after previous request/response
-              console.debug(
-                "// queue request/response callback after previous request/response"
-              );
-              active[previous].res.on("end", () => {
+              if (console.isDebug) {
                 console.debug(
-                  "end of previous req/res: triggering new req/res callback"
+                  "// queue request/response callback after previous request/response"
                 );
+              }
+              active[previous].res.on("end", () => {
+                if (console.isDebug) {
+                  console.debug(
+                    "end of previous req/res: triggering new req/res callback"
+                  );
+                }
                 cb(req, res);
               });
             }
 
             if (gotten > 0 && socket.onData) {
-              socket.onData("", _, 0);
+              socket.onData(new Uint8Array(0), _, 0);
             }
           }
         }
@@ -377,22 +416,34 @@ export function httpClient(
   method: string,
   requestHeaders?: string,
   body?: { toString: () => string },
-  successCB?: (content: string, headers: string) => void,
+  successCB?: undefined, // this is removed in favor of the new data and head callback (dataCB, headCB)
   errorCB?: (message: string) => void,
-  finishCB?: () => void
-): void {
-  const complete: StringBuffer = new StringBuffer();
+  finishCB?: () => void,
+  dataCB?: (data: Uint8Array) => void,
+  headCB?: (head: StringBuffer) => void
+): { cancel: () => void; cancelled: boolean } {
+  if (successCB) {
+    throw Error("The successCB is not supported anymore.");
+  }
+
+  let complete: StringBuffer | undefined = new StringBuffer();
+
   let completeLength = 0;
   let chunked = false;
   let headerRead = false;
   let headerEnd = -1;
   let contentLength = -1;
   requestHeaders = requestHeaders || "";
+  let headers: StringBuffer;
+  let chunkedConsumer: ChunkedEncodingConsumer | undefined;
+
   if (!errorCB) {
     errorCB = print;
   }
 
-  sockConnect(
+  const textDecoder = new TextDecoder();
+
+  const socket = sockConnect(
     ssl,
     host,
     port,
@@ -407,32 +458,61 @@ export function httpClient(
       socket.flush();
     },
     function (data, sockfd, length) {
-      complete.append(data);
-      completeLength = completeLength + length;
+      try {
+        complete?.append(textDecoder.decode(data));
+        completeLength = completeLength + length;
 
-      if (!headerRead && (headerEnd = complete.indexOf("\r\n\r\n")) >= 0) {
-        headerRead = true;
-        chunked =
-          complete.toLowerCase().indexOf("transfer-encoding: chunked") >= 0;
-        const clIndex = complete.toLowerCase().indexOf("content-length: ");
-        if (clIndex >= 0) {
-          const endOfContentLength = complete.indexOf("\r\n", clIndex);
-          contentLength = parseInt(
-            complete.substring(clIndex + 15, endOfContentLength).toString()
-          );
-        }
-        headerEnd += 4;
-      }
+        if (
+          !headerRead &&
+          complete &&
+          (headerEnd = complete.indexOf("\r\n\r\n")) >= 0
+        ) {
+          headerRead = true;
+          chunked =
+            complete.toLowerCase().indexOf("transfer-encoding: chunked") >= 0;
+          const clIndex = complete.toLowerCase().indexOf("content-length: ");
+          if (clIndex >= 0) {
+            const endOfContentLength = complete.indexOf("\r\n", clIndex);
+            contentLength = parseInt(
+              complete.substring(clIndex + 15, endOfContentLength).toString()
+            );
+          }
+          headerEnd += 4;
+          headers = complete.substring(0, headerEnd);
+          complete = undefined;
+          if (headCB) {
+            headCB(headers);
+          }
 
-      if (chunked) {
-        if (complete.substring(complete.length - 5).toString() == "0\r\n\r\n") {
-          closeSocket(sockfd);
+          if (chunked) {
+            chunkedConsumer = createChunkedEncodingConsumer(dataCB);
+          }
+
+          // the rest of the data is considered data and has to be consumed by the data consumers.
+          data = data.subarray(headerEnd, data.length);
         }
-      }
-      if (contentLength >= 0) {
-        if (completeLength - headerEnd == contentLength) {
-          closeSocket(sockfd);
+
+        if (chunkedConsumer) {
+          // handle chunked data
+          const eof = chunkedConsumer(data);
+          if (eof) {
+            closeSocket(sockfd);
+          }
+        } else if (dataCB) {
+          // handle non chunked data
+          dataCB(data);
         }
+
+        if (contentLength >= 0) {
+          if (completeLength - headerEnd == contentLength) {
+            closeSocket(sockfd);
+          }
+        }
+      } catch (error) {
+        if (errorCB) {
+          errorCB(error);
+        }
+        closeSocket(sockfd);
       }
     },
     function () {
@@ -443,51 +523,53 @@ export function httpClient(
       }
     },
     function () {
-      let startFrom = headerEnd;
-      let content = null;
-
-      if (chunked) {
-        content = new StringBuffer();
-
-        let chunkLength;
-        do {
-          const chunkLengthEnd = complete.indexOf("\r\n", startFrom);
-          const lengthStr = complete
-            .substring(startFrom, chunkLengthEnd)
-            .toString();
-          chunkLength = parseInt(lengthStr, 16);
-          const chunkEnd = chunkLengthEnd + chunkLength + 2;
-
-          content.append(complete.substring(chunkLengthEnd + 2, chunkEnd));
-          startFrom = chunkEnd + 2;
-        } while (chunkLength > 0);
-      } else {
-        content = complete.substring(startFrom);
-      }
-
-      const headers = complete.substring(0, headerEnd);
-
-      if (successCB) {
-        successCB(content.toString(), headers.toString());
-      }
-      //free complete for GC
-      content = null;
       if (finishCB) {
         finishCB();
       }
     }
   );
+
+  const client = {
+    cancelled: false,
+    cancel: () => {
+      if (!client.cancelled) {
+        client.cancelled = true;
+        if (errorCB) {
+          errorCB("Request was cancelled.");
+        }
+        closeSocket(socket);
+      }
+    },
+  };
+  return client;
 }
 
+// get default port
+export function getDefaultPort(url: {
+  port: string;
+  protocol: string;
+}): number {
+  let port = parseInt(url.port, 10);
+  if (isNaN(port)) {
+    if (url.protocol === "https:") {
+      port = 443;
+    } else if (url.protocol === "http:") {
+      port = 80;
+    } else {
+      throw Error(`Cannot determine default port for protocol ${url.protocol}`);
+    }
+  }
+  return port;
+}
 export class XMLHttpRequest {
   private url?: AnchorElement;
   private method = "GET";
   private reponseHeaders?: string;
   private requestHeaders?: StringBuffer;
-  private status?: number;
-  private statusText?: string;
-  private responseURL?: string;
-  private responseText?: string;
+  public status?: number;
+  public statusText?: string;
+  public responseURL?: string;
+  public responseText?: string;
 
   public onerror?: (error: string) => void;
   public onload?: () => void;
@@ -495,7 +577,12 @@ export class XMLHttpRequest {
   public send(body: string): void {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
+
     if (this.url) {
+      let data: StringBuffer | undefined = undefined;
+      let responseHeaders: StringBuffer | undefined = undefined;
+      const textDecoder: TextDecoder = new TextDecoder();
+
       httpClient(
         this.url.protocol === "https:",
         this.url.hostname,
@@ -504,14 +591,25 @@ export class XMLHttpRequest {
         this.method,
         this.requestHeaders ? this.requestHeaders.toString() : undefined,
         body,
-        function (data: string, responseHeaders: string) {
-          const r = responseHeaders.match(/^HTTP\/[0-9.]+ ([0-9]+) (.*)/);
+        undefined,
+        function (error: string) {
+          console.error(error);
+          if (self.onerror) {
+            self.onerror(error);
+          }
+        },
+        function () {
+          const r =
+            responseHeaders &&
+            responseHeaders.toString().match(/^HTTP\/[0-9.]+ ([0-9]+) (.*)/);
           if (r) {
             self.status = parseInt(r[1], 10);
             self.statusText = r[2];
             self.responseURL = "";
-            self.responseText = data;
-            self.reponseHeaders = responseHeaders.substring(r[0].length + 2);
+            self.responseText = data && data.toString();
+            self.reponseHeaders =
+              responseHeaders &&
+              responseHeaders.substring(r[0].length + 2).toString();
             if (self.onload) {
               self.onload();
             }
@@ -520,12 +618,18 @@ export class XMLHttpRequest {
               self.onerror("Bad http status line.");
             }
           }
+          data = undefined;
+          responseHeaders = undefined;
         },
-        function (error: string) {
-          console.error(error);
-          if (self.onerror) {
-            self.onerror(error);
+        function (dataIn) {
+          if (data) {
+            data.append(textDecoder.decode(dataIn));
+          } else {
+            data = new StringBuffer(textDecoder.decode(dataIn));
           }
+        },
+        function (head) {
+          responseHeaders = head;
         }
       );
     } else {
@@ -550,19 +654,7 @@ export class XMLHttpRequest {
       );
     }
 
-    // get default port
-    let port = parseInt(this.url.port, 10);
-    if (isNaN(port)) {
-      if (this.url.protocol === "https:") {
-        port = 443;
-      } else if (this.url.protocol === "http:") {
-        port = 80;
-      } else {
-        throw Error(
-          `Cannot determine default port for protocol ${this.url.protocol}`
-        );
-      }
-    }
+    const port = getDefaultPort(this.url);
     this.url.port = "" + port;
   }
 

@@ -11,9 +11,34 @@ var __assign = (this && this.__assign) || function () {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startConfigServer = exports.redirect = exports.baExceptionPathes = exports.requestHandler = exports.addSchema = void 0;
+/*
+MIT License
+
+Copyright (c) 2021 Marcel Kottmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 var configManager = require("./config");
 var boot_1 = require("./boot");
+var native_ota_1 = require("./native-ota");
 var http_1 = require("./http");
+var filelogging_1 = require("./filelogging");
 var schema = {
     access: {
         type: "object",
@@ -52,6 +77,10 @@ var schema = {
             password: {
                 type: "string",
                 title: "Password",
+            },
+            bssid: {
+                type: "string",
+                title: "BSSID",
             },
         },
     },
@@ -94,14 +123,14 @@ function redirect(res, location) {
     res.end();
 }
 exports.redirect = redirect;
-function page(res, headline, text, cb) {
+function page(res, headline, text, cb, additionalHeadTags) {
     if (cb) {
         // register callback
         res.on("end", cb);
     }
     res.setStatus(200);
     res.headers.set("content-type", "text/html");
-    res.write("<!doctype html><html><head><title>esp32-javascript</title>\n      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, shrink-to-fit=no\">\n      <style>\n      body {\n        font-family: monospace;\n        font-size: 13pt;\n      }\n      .input {\n        font-family: monospace;\n        font-size: 13pt;\n      }\n      .fill {\n        width: calc(100% - 146px);\n      }\n      .full {\n        width: calc(100% - 16px);\n      }\n      .txt {\n        height: 100px;\n      }\n      .formlabel {\n        display: inline-block;\n        width: 130px;\n      }\n      .formpad {\n        padding: 8px;\n      }\n      .green {\n        color: green;\n      }\n      .red {\n        color: red;\n      }\n      </style>\n      \n      </head>\n      <body><div><div><div><h1>" + headline + "</h1>");
+    res.write("<!doctype html><html><head><title>esp32-javascript</title>\n      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, shrink-to-fit=no\">\n      <style>\n      body {\n        font-family: monospace;\n        font-size: 13pt;\n      }\n      .input {\n        font-family: monospace;\n        font-size: 13pt;\n      }\n      .fill {\n        width: calc(100% - 146px);\n      }\n      .full {\n        width: calc(100% - 16px);\n      }\n      .txt {\n        height: 100px;\n      }\n      .formlabel {\n        display: inline-block;\n      }\n      .formpad {\n        padding: 8px;\n      }\n      .green {\n        color: green;\n      }\n      .red {\n        color: red;\n      }\n      .inline-form {\n        display: inline;\n      }\n      .blink {\n        animation: blinkanimation 1s linear infinite;\n      }\n      .nowrap {\n        white-space: nowrap;\n      }\n      @keyframes blinkanimation {\n        50% {\n          opacity: 0;\n        }\n      }\n      </style>\n      " + (additionalHeadTags ? additionalHeadTags : "") + "\n      <script>\n        function showpassword(label)\n        {\n          var inputId=label.parentElement.getAttribute(\"for\");\n          document.getElementById(inputId).setAttribute(\"type\",\"text\");\n        }\n      </script>\n      </head>\n      <body><div><div><div><h1>" + headline + "</h1>");
     if (Array.isArray(text)) {
         res.write(text.join(""));
     }
@@ -110,6 +139,34 @@ function page(res, headline, text, cb) {
     }
     res.end("</div></div></div></body></html>\r\n\r\n");
 }
+function getLogFileList() {
+    global.el_flushLogBuffer();
+    var logFileList = [];
+    try {
+        var list = listDir(filelogging_1.FILE_LOGGING_DIRECTORY).sort();
+        list.forEach(function (f) {
+            try {
+                logFileList.push({
+                    filename: f,
+                    size: fileSize(filelogging_1.FILE_LOGGING_DIRECTORY + "/" + f),
+                });
+            }
+            catch (error) {
+                console.error(error);
+            }
+        });
+    }
+    catch (_) {
+        // ignore
+    }
+    return logFileList;
+}
+var upgradeStatus = {
+    status: "idle",
+    message: "",
+};
+var successMessage = "";
+var errorMessage = "";
 function startConfigServer() {
     console.info("Starting config server.");
     var authString = "Basic " +
@@ -117,7 +174,7 @@ function startConfigServer() {
             ":" +
             configManager.config.access.password);
     http_1.httpServer(80, false, function (req, res) {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c, _d, _e, _f;
         if (req.headers.get("authorization") !== authString &&
             exports.baExceptionPathes.indexOf(req.path) < 0) {
             console.debug("401 response");
@@ -131,8 +188,6 @@ function startConfigServer() {
             });
         }
         else if (req.path === "/setup" || req.path === "/restart") {
-            var saved = false;
-            var error = undefined;
             if (req.path === "/setup" && req.method === "POST") {
                 try {
                     var storedConfig = configManager.config;
@@ -145,23 +200,34 @@ function startConfigServer() {
                     var config_1 = http_1.parseQueryStr(req.body);
                     storedConfig.wifi.ssid = config_1.ssid;
                     storedConfig.wifi.password = config_1.password;
+                    storedConfig.wifi.bssid = config_1.bssid;
+                    storedConfig.access.username = config_1.username;
+                    storedConfig.access.password = config_1.userpass;
                     storedConfig.ota.url = config_1.url;
                     storedConfig.ota.offline = config_1.offline === "true";
                     storedConfig.ota.script = config_1.script;
                     configManager.saveConfig(storedConfig);
-                    saved = true;
+                    successMessage = "Saved. Some settings require a restart.";
                 }
                 catch (err) {
-                    error = err;
+                    errorMessage = err;
                 }
             }
             var config = configManager.config;
-            page(res, "Setup", "" + (saved
-                ? '<div class="formpad green">Saved. Some settings require a restart.</div>'
-                : "") + (error
-                ? "<div class=\"formpad red\">Saving failed. Error message: " + error + "</div>"
-                : "") + "<form action=\"/setup\" method=\"post\">\n        <div class=\"formpad\"><label for=\"ssid\" class=\"formlabel\">SSID</label><input type=\"text\" name=\"ssid\" class=\"fill input\" value=\"" + (((_a = config.wifi) === null || _a === void 0 ? void 0 : _a.ssid) || "") + "\" /></div>\n        <div class=\"formpad\"><label for=\"password\" class=\"formlabel\">Password</label><input type=\"text\" name=\"password\" class=\"fill input\" value=\"" + (((_b = config.wifi) === null || _b === void 0 ? void 0 : _b.password) || "") + "\" /></div>\n        <div class=\"formpad\"><label for=\"url\" class=\"formlabel\">JS file url</label><input type=\"text\" name=\"url\" class=\"fill input\" value=\"" + (((_c = config.ota) === null || _c === void 0 ? void 0 : _c.url) || "") + "\" /></div>\n        <div class=\"formpad\"><label for=\"offline\"><input type=\"checkbox\" name=\"offline\" value=\"true\" " + (((_d = config.ota) === null || _d === void 0 ? void 0 : _d.offline) ? "checked" : "") + "/> Offline Mode</label></div>\n        <label for=\"script\" class=\"formpad\">Offline Script</label><div class=\"formpad\"><textarea name=\"script\" class=\"full input txt\">" + (((_e = config.ota) === null || _e === void 0 ? void 0 : _e.script) || "") + "</textarea></div>\n        <div class=\"formpad\"><input type=\"submit\" value=\"Save\" class=\"formpad input\"/></div></form>\n        <h1>Request restart</h1>\n        <form action=\"/restart\" method=\"post\"><div class=\"formpad\"><input type=\"submit\" value=\"Restart\" class=\"formpad input\"/></div></form>\n        <h1>Uptime</h1>\n        <div class=\"formpad\">\n          Boot time: " + boot_1.getBootTime() + "\n        </div>\n        <div class=\"formpad\">\n          Uptime (hours): " + Math.floor((Date.now() - boot_1.getBootTime().getTime()) / 10 / 60 / 60) /
+            page(res, "Setup", "" + (successMessage
+                ? "<div class=\"formpad green\">" + successMessage + "</div>"
+                : "") + (errorMessage ? "<div class=\"formpad red\">" + errorMessage + "</div>" : "") + "<h2>Configuration</h2><h3>Wifi</h3><form action=\"/setup\" method=\"post\">\n        <div class=\"formpad\"><label for=\"ssid\" class=\"formlabel\">SSID</label><br /><input type=\"text\" name=\"ssid\" class=\"full input\" value=\"" + (((_a = config.wifi) === null || _a === void 0 ? void 0 : _a.ssid) || "") + "\" /></div>\n        <div class=\"formpad\"><label for=\"password\" class=\"formlabel\">Password (<a href=\"javascript:void(0)\" onclick=\"showpassword(this)\">Show</a>)</label><br /><input type=\"password\" name=\"password\" id=\"password\" class=\"full input\" value=\"" + (((_b = config.wifi) === null || _b === void 0 ? void 0 : _b.password) || "") + "\" /></div>\n        <div class=\"formpad\"><label for=\"bssid\" class=\"formlabel\">BSSID (optional)</label></br /><input type=\"text\" name=\"bssid\" class=\"full input\" value=\"" + (((_c = config.wifi) === null || _c === void 0 ? void 0 : _c.bssid) || "") + "\" /></div>\n        <h3>Basic authentication</h3>\n        <div class=\"formpad\"><label for=\"username\" class=\"formlabel\">Username</label></br /><input type=\"text\" name=\"username\" class=\"full input\" value=\"" + config.access.username + "\" /></div>\n        <div class=\"formpad\"><label for=\"userpass\" class=\"formlabel\">Password (<a href=\"javascript:void(0)\" onclick=\"showpassword(this)\">Show</a>)</label></br /><input type=\"password\" name=\"userpass\" id=\"userpass\" class=\"full input\" value=\"" + config.access.password + "\" /></div>\n        <h3>JavaScript OTA</h3><div class=\"formpad\"><label for=\"url\" class=\"formlabel\">JS file url</label></br /><input type=\"text\" name=\"url\" class=\"full input\" value=\"" + (((_d = config.ota) === null || _d === void 0 ? void 0 : _d.url) || "") + "\" /></div>\n        <div class=\"formpad\"><label for=\"offline\"><input type=\"checkbox\" name=\"offline\" value=\"true\" " + (((_e = config.ota) === null || _e === void 0 ? void 0 : _e.offline) ? "checked" : "") + "/> Offline Mode</label></div>\n        <label for=\"script\" class=\"formpad\">Offline Script</label><div class=\"formpad\"><textarea name=\"script\" class=\"full input txt\">" + (((_f = config.ota) === null || _f === void 0 ? void 0 : _f.script) || "") + "</textarea></div>\n        <div class=\"formpad\"><input type=\"submit\" value=\"Save\" class=\"formpad input\"/></div></form>\n        <h2>Logs</h2>\n        <div class=\"formpad\">\n          <p>\n            Showing last " + filelogging_1.LOG_FILE_NUM_LIMIT + " log files, with each having maximum of " + filelogging_1.LOG_FILE_SIZE_LIMIT / 1024 + " kB data.<br/>\n          </p>\n          " + getLogFileList()
+                .map(function (e) {
+                return "<div>" + e.filename + " (" + (e.size === undefined ? "?" : Math.floor(e.size / 1024)) + " kB) <span class=\"nowrap\"><form action=\"/viewlog\" method=\"post\" class=\"inline-form\"><button class=\"input\" type=\"submit\" name=\"file\" value=\"" + filelogging_1.FILE_LOGGING_DIRECTORY + "/" + e.filename + "\">View</button></form>&nbsp;<form action=\"/deletelog\" method=\"post\" class=\"inline-form\"><button class=\"input\" type=\"submit\" name=\"file\" value=\"" + filelogging_1.FILE_LOGGING_DIRECTORY + "/" + e.filename + "\">Delete</button></form></span></div>";
+            })
+                .join("") + "\n          </form>\n        </div>\n        \n        " + (el_is_native_ota_supported()
+                ? "<h2>Native OTA Upgrade</h2>\n        <form action=\"/native-ota\" method=\"post\">\n          <div class=\"formpad\"><label for=\"appbin\" class=\"formlabel\">URL to app binary</label><br /><input type=\"text\" name=\"appbin\" class=\"full input\" value=\"\" /></div>\n          <div class=\"formpad\"><label for=\"modulesbin\" class=\"formlabel\">URL to modules binary</label><br /><input type=\"text\" name=\"modulesbin\" class=\"full input\" value=\"\" /></div>\n          <div class=\"formpad\"><input type=\"submit\" value=\"Upgrade\" class=\"formpad input\" " + (upgradeStatus.status === "inprogress" ? "disabled" : "") + "/> " + (upgradeStatus.status !== "idle"
+                    ? '<a href="/native-ota">Upgrade status</a>'
+                    : "") + "</div>\n        </form>"
+                : "") + "\n\n        <h2>Request restart</h2>\n        <form action=\"/restart\" method=\"post\"><div class=\"formpad\"><input type=\"submit\" value=\"Restart\" class=\"formpad input\"/></div></form>\n        <h2>Uptime</h2>\n        <div class=\"formpad\">\n          Boot time: " + boot_1.getBootTime() + "\n        </div>\n        <div class=\"formpad\">\n          Uptime (hours): " + Math.floor((Date.now() - boot_1.getBootTime().getTime()) / 10 / 60 / 60) /
                 100 + "<br />\n        </div>\n        <div class=\"formpad\">\n          Boot time is only available if a valid 'JS file url' is configured, otherwise it starts at unix epoch (1970).\n        </div>");
+            successMessage = "";
+            errorMessage = "";
         }
         else {
             var handled = false;
@@ -172,12 +238,12 @@ function startConfigServer() {
                         handled = Boolean(handled || reqHandled);
                     }
                     catch (error) {
-                        var errorMessage = "Internal server error: " + error;
-                        console.error(errorMessage);
+                        var errorMessage_1 = "Internal server error: " + error;
+                        console.error(errorMessage_1);
                         if (!res.isEnded) {
                             res.setStatus(500);
                             res.headers.set("Content-type", "text/plain");
-                            res.end(errorMessage);
+                            res.end(errorMessage_1);
                         }
                     }
                 }
@@ -232,6 +298,79 @@ function startConfigServer() {
                     res.setStatus(500);
                     res.end("Internal server error while saving configuration.");
                 }
+            }
+        }
+    });
+    exports.requestHandler.push(function (req, res) {
+        if (/\/viewlog/.exec(req.path)) {
+            var parsed = http_1.parseQueryStr(req.body);
+            if (parsed.file.indexOf(filelogging_1.FILE_LOGGING_DIRECTORY) !== 0) {
+                res.setStatus(400, "Invalid supplied filename.");
+                res.end();
+                return;
+            }
+            try {
+                var content = readFile(parsed.file);
+                res.setStatus(200);
+                res.headers.set("Content-type", "text/plain");
+                global.el_flushLogBuffer();
+                res.write(content);
+            }
+            catch (_a) {
+                res.setStatus(404, "Not found");
+            }
+            finally {
+                res.end();
+            }
+        }
+    });
+    exports.requestHandler.push(function (req, res) {
+        if (/\/deletelog/.exec(req.path)) {
+            var parsed = http_1.parseQueryStr(req.body);
+            if (parsed.file.indexOf(filelogging_1.FILE_LOGGING_DIRECTORY) !== 0) {
+                res.setStatus(400, "Invalid supplied filename.");
+                res.end();
+                return;
+            }
+            if (removeFile(parsed.file) >= 0) {
+                successMessage = "Log file deleted successfully.";
+            }
+            else {
+                errorMessage = "Log file not found.";
+            }
+            redirect(res, "/setup");
+        }
+    });
+    exports.requestHandler.push(function (req, res) {
+        if (/\/native-ota/.exec(req.path)) {
+            if (req.method === "POST") {
+                var parsed_1 = http_1.parseQueryStr(req.body);
+                if (parsed_1.appbin && parsed_1.modulesbin) {
+                    if (upgradeStatus.status !== "inprogress") {
+                        upgradeStatus.status = "inprogress";
+                        upgradeStatus.message = "";
+                        setTimeout(function () {
+                            native_ota_1.upgrade(parsed_1.appbin, parsed_1.modulesbin, function (error) {
+                                upgradeStatus.status = "error";
+                                upgradeStatus.message = error;
+                            }, function () {
+                                upgradeStatus.status = "success";
+                                upgradeStatus.message = "";
+                            });
+                        }, 2000);
+                    }
+                }
+                redirect(res, "/native-ota");
+            }
+            else {
+                page(res, "Upgrade", "" + ((upgradeStatus.status === "error" &&
+                    "<div class=\"formpad red\">An error occured while upgrading: " + upgradeStatus.message + "</div>") ||
+                    (upgradeStatus.status === "success" &&
+                        "<div class=\"formpad green\">Upgrade was successful. Please restart to start upgraded firmware.</div>\n              <form action=\"/restart\" method=\"post\"><div class=\"formpad\"><input type=\"submit\" value=\"Restart\" class=\"formpad input\"/></div></form>") ||
+                    (upgradeStatus.status === "inprogress" &&
+                        "<div class=\"formpad\">Upgrade in progress<span class=\"blink\">...</span><br/>Page refreshes automatically.</div>") ||
+                    (upgradeStatus.status === "idle" &&
+                        "<div class=\"formpad red\">No upgrade started.</div>")), undefined, '<meta http-equiv="refresh" content="20">');
             }
         }
     });
